@@ -299,6 +299,17 @@ const btnDownload = document.getElementById('btnDownload');
 const prevWrap = document.getElementById('preview');
 const prevJson = document.getElementById('previewJson');
 
+// Esperar a que html2canvas se cargue antes de configurar el botón de descarga
+function waitForHtml2Canvas(callback, maxAttempts = 50) {
+  if (typeof html2canvas !== 'undefined') {
+    callback();
+  } else if (maxAttempts > 0) {
+    setTimeout(() => waitForHtml2Canvas(callback, maxAttempts - 1), 100);
+  } else {
+    console.error('html2canvas no se cargó después de 5 segundos');
+  }
+}
+
 // --- Data collection reusable ---
 function buildPayload(){
   const fd = new FormData(form);
@@ -364,23 +375,45 @@ btnPreview.addEventListener('click', ()=>{
 });
 
 // --- Download formulario como imagen ---
-btnDownload.addEventListener('click', async ()=>{
-  // Verificar que html2canvas esté disponible
-  if (typeof html2canvas === 'undefined') {
-    alert('Error: La librería de captura no está cargada. Por favor, recarga la página.');
-    return;
-  }
+waitForHtml2Canvas(() => {
+  btnDownload.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Verificar que html2canvas esté disponible
+    if (typeof html2canvas === 'undefined') {
+      alert('Error: La librería de captura no está cargada. Por favor, recarga la página.');
+      console.error('html2canvas no está disponible');
+      return;
+    }
   
   // Mostrar indicador de carga
+  const originalText = btnDownload.textContent;
   btnDownload.disabled = true;
   btnDownload.textContent = 'Generando imagen...';
   
   try {
-    // Obtener el elemento del formulario
+    // Obtener el elemento del formulario completo (incluyendo el contenedor)
     const formElement = document.getElementById('form');
     if (!formElement) {
       throw new Error('No se encontró el formulario');
     }
+    
+    // Ocultar elementos que no queremos en la captura (botones de acción)
+    const actionsDiv = formElement.querySelector('.actions');
+    const swBanner = document.getElementById('swUpdateBanner');
+    const previewSection = document.getElementById('preview');
+    
+    const originalActionsDisplay = actionsDiv ? actionsDiv.style.display : '';
+    const originalBannerDisplay = swBanner ? swBanner.style.display : '';
+    const originalPreviewDisplay = previewSection ? previewSection.style.display : '';
+    
+    if (actionsDiv) actionsDiv.style.display = 'none';
+    if (swBanner) swBanner.style.display = 'none';
+    if (previewSection) previewSection.classList.add('hidden');
+    
+    // Esperar un momento para que se apliquen los cambios
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Capturar el formulario como imagen
     const canvas = await html2canvas(formElement, {
@@ -389,11 +422,18 @@ btnDownload.addEventListener('click', async ()=>{
       logging: false,
       useCORS: true,
       allowTaint: false,
-      scrollX: 0,
-      scrollY: 0,
+      scrollX: -window.scrollX,
+      scrollY: -window.scrollY,
+      width: formElement.scrollWidth,
+      height: formElement.scrollHeight,
       windowWidth: formElement.scrollWidth,
       windowHeight: formElement.scrollHeight
     });
+    
+    // Restaurar elementos ocultos
+    if (actionsDiv) actionsDiv.style.display = originalActionsDisplay;
+    if (swBanner) swBanner.style.display = originalBannerDisplay;
+    if (previewSection) previewSection.classList.remove('hidden');
     
     // Convertir canvas a blob y descargar
     canvas.toBlob((blob) => {
@@ -406,24 +446,30 @@ btnDownload.addEventListener('click', async ()=>{
       const ts = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
       a.href = url;
       a.download = `formulario-asegurabilidad-${ts}.png`;
+      a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      
+      // Limpiar después de un momento
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
       
       // Restaurar botón
       btnDownload.disabled = false;
-      btnDownload.textContent = 'Descargar imagen';
+      btnDownload.textContent = originalText;
       
       showNotification('✓ Imagen descargada correctamente', 'success');
     }, 'image/png', 0.95);
     
   } catch (error) {
     console.error('Error al generar imagen:', error);
-    showNotification('⚠️ Error al generar la imagen. Intenta nuevamente.', 'warning');
+    showNotification('⚠️ Error al generar la imagen: ' + error.message, 'warning');
     btnDownload.disabled = false;
-    btnDownload.textContent = 'Descargar imagen';
+    btnDownload.textContent = originalText;
   }
+  });
 });
 
 // --- Offline queue (IndexedDB) ---
