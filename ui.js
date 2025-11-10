@@ -300,13 +300,35 @@ const prevWrap = document.getElementById('preview');
 const prevJson = document.getElementById('previewJson');
 
 // Esperar a que html2canvas se cargue antes de configurar el botón de descarga
-function waitForHtml2Canvas(callback, maxAttempts = 50) {
-  if (typeof html2canvas !== 'undefined') {
+function waitForHtml2Canvas(callback, maxAttempts = 100) {
+  // Verificar si ya está disponible
+  if (typeof html2canvas !== 'undefined' && (window.html2canvasReady || typeof html2canvas === 'function')) {
     callback();
-  } else if (maxAttempts > 0) {
-    setTimeout(() => waitForHtml2Canvas(callback, maxAttempts - 1), 100);
+    return;
+  }
+  
+  // Escuchar el evento personalizado
+  const handler = () => {
+    if (typeof html2canvas !== 'undefined') {
+      window.removeEventListener('html2canvasReady', handler);
+      callback();
+    }
+  };
+  window.addEventListener('html2canvasReady', handler);
+  
+  // Fallback: intentar cada 100ms
+  if (maxAttempts > 0) {
+    setTimeout(() => {
+      if (typeof html2canvas !== 'undefined') {
+        window.removeEventListener('html2canvasReady', handler);
+        callback();
+      } else {
+        waitForHtml2Canvas(callback, maxAttempts - 1);
+      }
+    }, 100);
   } else {
-    console.error('html2canvas no se cargó después de 5 segundos');
+    console.error('html2canvas no se cargó después de 10 segundos');
+    window.removeEventListener('html2canvasReady', handler);
   }
 }
 
@@ -381,9 +403,9 @@ waitForHtml2Canvas(() => {
     e.stopPropagation();
     
     // Verificar que html2canvas esté disponible
-    if (typeof html2canvas === 'undefined') {
-      alert('Error: La librería de captura no está cargada. Por favor, recarga la página.');
-      console.error('html2canvas no está disponible');
+    if (typeof html2canvas === 'undefined' || typeof html2canvas !== 'function') {
+      alert('Error: La librería de captura no está cargada. Por favor, recarga la página.\n\nSi el problema persiste, verifica tu conexión a internet.');
+      console.error('html2canvas no está disponible. Tipo:', typeof html2canvas);
       return;
     }
   
