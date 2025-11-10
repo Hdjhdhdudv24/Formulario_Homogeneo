@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1b5e20" />
+  <meta name="description" content="Formulario de declaración de asegurabilidad para cotización de planes de salud" />
+  <title>Declaración de Asegurabilidad • UI</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/png" href="./icons/icon-192.png" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo"><img src="./assets/logo_SB.png" alt="Seguros Bolívar" /></div>
+      <span class="brand-name">Seguros Bolívar</span>
+    </div>
+    <div id="connectionStatus" class="status-online">En línea</div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero card">
+      <div>
+        <h1>Su salud es nuestra prioridad</h1>
+        <p>Complete la declaración para cotizar su plan.</p>
+      </div>
+      <button class="btn primary">Cotice su plan</button>
+    </section>
+
+    <form id="form" class="card form-grid">
+      <div id="formNote" class="form-note" style="display:none;"></div>
+      <div class="grid">
+        <label class="field">
+          <span>Correo de contacto</span>
+          <input type="email" name="contactEmail" id="contactEmail" placeholder="ej: nombre@correo.com" required />
+        </label>
+      </div>
+      <h2 class="section-title">Selección de producto</h2>
+      <div class="product-group">
+        <label class="chip"><input type="radio" name="product" value="SALUD_INDIVIDUAL" required><span>Salud Individual</span></label>
+        <label class="chip"><input type="radio" name="product" value="SALUD_COLECTIVO"><span>Salud Colectivo</span></label>
+        <label class="chip"><input type="radio" name="product" value="VIDA_GRUPO"><span>Vida Grupo</span></label>
+      </div>
+
+      <div class="grid">
+        <label class="field">
+          <span># de solicitantes asegurados</span>
+          <select id="numApplicants" name="numApplicants">
+            <option>1</option><option>2</option><option>3</option><option>4</option>
+            <option>5</option><option>6</option><option>7</option><option>8</option>
+          </select>
+        </label>
+      </div>
+
+      <h2 class="section-title">Datos de los solicitantes asegurados</h2>
+      <div id="applicantsTable" class="table">
+        <!-- Rows injected by JS -->
+      </div>
+
+      <h2 class="section-title">Cuestionario médico</h2>
+      <p class="muted">Marque “Sí” si aplica para alguno de los solicitantes y detalle la información.</p>
+      <div id="questions" class="accordion">
+        <!-- Questions injected by JS -->
+      </div>
+
+      <div class="actions">
+        <button type="button" id="btnPreview" class="btn">Vista previa</button>
+        <button type="button" id="btnDownload" class="btn">Descargar JSON</button>
+        <button type="button" id="btnRetry" class="btn" style="display:none;">Reintentar envíos</button>
+        <button type="submit" class="btn primary">Continuar</button>
+      </div>
+      <div id="swUpdateBanner" class="sw-update-banner" style="display:none;">
+        <span>🔄 Nueva versión disponible</span>
+        <button id="swUpdateBtn" class="btn primary" style="margin-left:12px;padding:6px 12px;font-size:13px;">Actualizar ahora</button>
+      </div>
+    </form>
+
+    <section id="preview" class="card hidden">
+      <h2>Vista previa (solo UI)</h2>
+      <pre id="previewJson"></pre>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <small>UI prototipo • 2025-10-31</small>
+  </footer>
+
+  <script src="ui.js"></script>
+  <script>
+    // Registrar Service Worker para modo offline
+    if ('serviceWorker' in navigator) {
+      let swRegistration = null;
+      let updatePrompt = null;
+      
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js')
+          .then((reg) => {
+            console.log('Service Worker registrado:', reg.scope);
+            swRegistration = reg;
+            
+            // Detectar actualizaciones del SW
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // Hay una nueva versión disponible
+                  const banner = document.getElementById('swUpdateBanner');
+                  if (banner) banner.style.display = 'flex';
+                }
+              });
+            });
+            
+            // Verificar actualizaciones periódicamente
+            setInterval(() => reg.update(), 60000);
+          })
+          .catch((err) => {
+            console.log('Error al registrar Service Worker:', err);
+          });
+      });
+      
+      // Manejar actualización del SW
+      const updateBtn = document.getElementById('swUpdateBtn');
+      if (updateBtn) {
+        updateBtn.addEventListener('click', () => {
+          if (swRegistration && swRegistration.waiting) {
+            swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+            window.location.reload();
+          }
+        });
+      }
+      
+      // Manejar prompt de instalación PWA
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        updatePrompt = e;
+        // Opcional: mostrar botón de instalación
+        // Puedes añadir un botón en la UI si lo deseas
+      });
+    }
+  </script>
+</body>
+</html>
