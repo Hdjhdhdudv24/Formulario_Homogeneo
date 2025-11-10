@@ -11,9 +11,7 @@ const PRECACHE_FILES = [
   './styles.css',
   './ui.js',
   './manifest.json',
-  './assets/logo_SB.png',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
+  './assets/logo_SB.png'
 ];
 
 // Instalación: precachear app shell

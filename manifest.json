@@ -2,7 +2,7 @@
   "name": "Declaración de Asegurabilidad - Seguros Bolívar",
   "short_name": "Asegurabilidad SB",
   "description": "Formulario de declaración de asegurabilidad para cotización de planes de salud",
-  "start_url": "/index.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1b5e20",
