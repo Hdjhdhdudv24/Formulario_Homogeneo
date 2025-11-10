@@ -363,19 +363,67 @@ btnPreview.addEventListener('click', ()=>{
   prevWrap.classList.remove('hidden');
 });
 
-// --- Download current payload as JSON ---
-btnDownload.addEventListener('click', ()=>{
-  const out = buildPayload();
-  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const ts = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
-  a.href = url;
-  a.download = `declaracion-${ts}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+// --- Download formulario como imagen ---
+btnDownload.addEventListener('click', async ()=>{
+  // Verificar que html2canvas esté disponible
+  if (typeof html2canvas === 'undefined') {
+    alert('Error: La librería de captura no está cargada. Por favor, recarga la página.');
+    return;
+  }
+  
+  // Mostrar indicador de carga
+  btnDownload.disabled = true;
+  btnDownload.textContent = 'Generando imagen...';
+  
+  try {
+    // Obtener el elemento del formulario
+    const formElement = document.getElementById('form');
+    if (!formElement) {
+      throw new Error('No se encontró el formulario');
+    }
+    
+    // Capturar el formulario como imagen
+    const canvas = await html2canvas(formElement, {
+      backgroundColor: '#ffffff',
+      scale: 2, // Mayor calidad
+      logging: false,
+      useCORS: true,
+      allowTaint: false,
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: formElement.scrollWidth,
+      windowHeight: formElement.scrollHeight
+    });
+    
+    // Convertir canvas a blob y descargar
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        throw new Error('Error al generar la imagen');
+      }
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
+      a.href = url;
+      a.download = `formulario-asegurabilidad-${ts}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      // Restaurar botón
+      btnDownload.disabled = false;
+      btnDownload.textContent = 'Descargar imagen';
+      
+      showNotification('✓ Imagen descargada correctamente', 'success');
+    }, 'image/png', 0.95);
+    
+  } catch (error) {
+    console.error('Error al generar imagen:', error);
+    showNotification('⚠️ Error al generar la imagen. Intenta nuevamente.', 'warning');
+    btnDownload.disabled = false;
+    btnDownload.textContent = 'Descargar imagen';
+  }
 });
 
 // --- Offline queue (IndexedDB) ---

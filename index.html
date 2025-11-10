@@ -25,7 +25,6 @@
         <h1>Su salud es nuestra prioridad</h1>
         <p>Complete la declaración para cotizar su plan.</p>
       </div>
-      <button class="btn primary">Cotice su plan</button>
     </section>
 
     <form id="form" class="card form-grid">
@@ -66,7 +65,7 @@
 
       <div class="actions">
         <button type="button" id="btnPreview" class="btn">Vista previa</button>
-        <button type="button" id="btnDownload" class="btn">Descargar JSON</button>
+        <button type="button" id="btnDownload" class="btn">Descargar imagen</button>
         <button type="button" id="btnRetry" class="btn" style="display:none;">Reintentar envíos</button>
         <button type="submit" class="btn primary">Continuar</button>
       </div>
@@ -86,6 +85,7 @@
     <small>UI prototipo • 2025-10-31</small>
   </footer>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="ui.js"></script>
   <script>
     // Registrar Service Worker para modo offline
