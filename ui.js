@@ -332,8 +332,69 @@ function waitForHtml2Canvas(callback, maxAttempts = 100) {
   }
 }
 
+// Función para generar imagen del formulario en base64
+async function generateFormImage() {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Verificar que html2canvas esté disponible
+      if (typeof html2canvas === 'undefined') {
+        reject(new Error('html2canvas no está disponible'));
+        return;
+      }
+      
+      const formElement = document.getElementById('form');
+      if (!formElement) {
+        reject(new Error('No se encontró el formulario'));
+        return;
+      }
+      
+      // Ocultar elementos que no queremos en la captura
+      const actionsDiv = formElement.querySelector('.actions');
+      const swBanner = document.getElementById('swUpdateBanner');
+      const previewSection = document.getElementById('preview');
+      
+      const originalActionsDisplay = actionsDiv ? actionsDiv.style.display : '';
+      const originalBannerDisplay = swBanner ? swBanner.style.display : '';
+      
+      if (actionsDiv) actionsDiv.style.display = 'none';
+      if (swBanner) swBanner.style.display = 'none';
+      if (previewSection) previewSection.classList.add('hidden');
+      
+      // Esperar un momento para que se apliquen los cambios
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Capturar el formulario como imagen
+      const canvas = await html2canvas(formElement, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        logging: false,
+        useCORS: true,
+        allowTaint: false,
+        scrollX: -window.scrollX,
+        scrollY: -window.scrollY,
+        width: formElement.scrollWidth,
+        height: formElement.scrollHeight,
+        windowWidth: formElement.scrollWidth,
+        windowHeight: formElement.scrollHeight
+      });
+      
+      // Restaurar elementos ocultos
+      if (actionsDiv) actionsDiv.style.display = originalActionsDisplay;
+      if (swBanner) swBanner.style.display = originalBannerDisplay;
+      if (previewSection) previewSection.classList.remove('hidden');
+      
+      // Convertir canvas a base64
+      const base64 = canvas.toDataURL('image/png').split(',')[1]; // Remover el prefijo data:image/png;base64,
+      resolve(base64);
+      
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 // --- Data collection reusable ---
-function buildPayload(){
+async function buildPayload(includeImage = false){
   const fd = new FormData(form);
   const n = parseInt(fd.get('numApplicants')||'1',10);
   const applicants = [];
@@ -377,7 +438,8 @@ function buildPayload(){
     }
     return entry;
   });
-  return {
+  
+  const payload = {
     submission_id: uuidv4(),
     schema_version: 'ph041.v1',
     contactEmail: fd.get('contactEmail') || '',
@@ -387,11 +449,23 @@ function buildPayload(){
     medical,
     createdAt: new Date().toISOString()
   };
+  
+  // Añadir imagen si se solicita
+  if (includeImage) {
+    try {
+      payload.imageBase64 = await generateFormImage();
+    } catch (error) {
+      console.error('Error al generar imagen:', error);
+      // Continuar sin imagen si falla
+    }
+  }
+  
+  return payload;
 }
 
 // --- Preview ---
-btnPreview.addEventListener('click', ()=>{
-  const out = buildPayload();
+btnPreview.addEventListener('click', async ()=>{
+  const out = await buildPayload(false); // No incluir imagen en preview
   prevJson.textContent = JSON.stringify(out, null, 2);
   prevWrap.classList.remove('hidden');
 });
@@ -814,39 +888,61 @@ function showNotification(message, type = 'info') {
 // --- Submit: guarda offline y sincroniza ---
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
-  const payload = buildPayload();
-  const isOnline = navigator.onLine;
   
-  if (isOnline) {
-    // Intentar enviar inmediatamente
-    const item = { id: Date.now(), status: 'pending', payload };
-    const sent = await sendPayload(item);
+  // Mostrar indicador de carga
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const originalSubmitText = submitBtn ? submitBtn.textContent : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Generando imagen y enviando...';
+  }
+  
+  try {
+    // Generar payload con imagen incluida
+    const payload = await buildPayload(true); // Incluir imagen
+    const isOnline = navigator.onLine;
     
-    if (sent) {
-      showNotification('✓ Formulario enviado correctamente', 'success');
-      form.reset();
-      renderApplicants(1);
-      renderQuestions();
-      updateApplicantLabels();
+    if (isOnline) {
+      // Intentar enviar inmediatamente
+      const item = { id: Date.now(), status: 'pending', payload };
+      const sent = await sendPayload(item);
+      
+      if (sent) {
+        showNotification('✓ Formulario enviado correctamente. Se enviará un correo con la imagen.', 'success');
+        form.reset();
+        renderApplicants(1);
+        renderQuestions();
+        updateApplicantLabels();
+      } else {
+        // Si falla, guardar en cola
+        await enqueue(payload);
+        showNotification('⚠️ Error al enviar. Guardado en cola para reintentar.', 'warning');
+        // Mostrar botón de reintentar
+        const retryBtn = document.getElementById('btnRetry');
+        if (retryBtn) retryBtn.style.display = 'inline-block';
+      }
     } else {
-      // Si falla, guardar en cola
+      // Sin conexión: guardar en cola
       await enqueue(payload);
-      showNotification('⚠️ Error al enviar. Guardado en cola para reintentar.', 'warning');
+      showNotification('📱 Sin conexión. Datos guardados localmente. Se enviarán automáticamente cuando haya conexión.', 'info');
       // Mostrar botón de reintentar
       const retryBtn = document.getElementById('btnRetry');
       if (retryBtn) retryBtn.style.display = 'inline-block';
     }
-  } else {
-    // Sin conexión: guardar en cola
-    await enqueue(payload);
-    showNotification('📱 Sin conexión. Datos guardados localmente. Se enviarán automáticamente cuando haya conexión.', 'info');
-    // Mostrar botón de reintentar
-    const retryBtn = document.getElementById('btnRetry');
-    if (retryBtn) retryBtn.style.display = 'inline-block';
+    
+    // Intentar sincronizar cola pendiente
+    await trySyncQueue();
+    
+  } catch (error) {
+    console.error('Error al procesar formulario:', error);
+    showNotification('⚠️ Error al procesar el formulario. Intenta nuevamente.', 'warning');
+  } finally {
+    // Restaurar botón
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalSubmitText;
+    }
   }
-  
-  // Intentar sincronizar cola pendiente
-  await trySyncQueue();
 });
 
 table.addEventListener('input', (e)=>{

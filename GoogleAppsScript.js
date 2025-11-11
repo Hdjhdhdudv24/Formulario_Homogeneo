@@ -1,5 +1,5 @@
 /**
- * Google Apps Script para recibir datos del formulario
+ * Google Apps Script para recibir datos del formulario y enviar correo
  * 
  * INSTRUCCIONES:
  * 1. Abre tu Google Sheet: https://docs.google.com/spreadsheets/d/1DQEXdDxKK-zK-Fb69mV899A91DepD6GLycOsosS6Z2c/edit
@@ -87,7 +87,17 @@ function doPost(e) {
     // Insertar en la hoja
     sheet.appendRow(row);
     
-    // Devolver éxito con headers CORS para desarrollo
+    // Enviar correo con la imagen si está disponible
+    if (data.contactEmail && data.imageBase64) {
+      try {
+        sendEmailWithImage(data.contactEmail, data.submission_id, data.imageBase64);
+      } catch (emailError) {
+        Logger.log('Error al enviar correo: ' + emailError.toString());
+        // No fallar el proceso si el correo falla
+      }
+    }
+    
+    // Devolver éxito
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
       message: 'Datos guardados correctamente',
@@ -101,6 +111,52 @@ function doPost(e) {
       success: false,
       error: error.toString()
     })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// Función para enviar correo con imagen adjunta
+function sendEmailWithImage(email, submissionId, imageBase64) {
+  try {
+    // Convertir base64 a blob
+    const imageBlob = Utilities.newBlob(
+      Utilities.base64Decode(imageBase64),
+      'image/png',
+      'formulario-asegurabilidad.png'
+    );
+    
+    // Preparar el cuerpo del correo
+    const subject = 'Formulario de Asegurabilidad - Seguros Bolívar';
+    const body = `
+Estimado/a entrevistador/a,
+
+Se ha recibido y procesado correctamente el formulario de declaración de asegurabilidad.
+
+Detalles:
+- ID de envío: ${submissionId}
+- Fecha: ${new Date().toLocaleString('es-ES')}
+
+Adjunto encontrará una imagen del formulario completado.
+
+Este es un correo automático, por favor no responda.
+
+Atentamente,
+Sistema de Formularios - Seguros Bolívar
+    `.trim();
+    
+    // Enviar correo
+    MailApp.sendEmail({
+      to: email,
+      subject: subject,
+      body: body,
+      attachments: [imageBlob],
+      name: 'Seguros Bolívar - Sistema de Formularios'
+    });
+    
+    Logger.log('Correo enviado exitosamente a: ' + email);
+    
+  } catch (error) {
+    Logger.log('Error al enviar correo: ' + error.toString());
+    throw error;
   }
 }
 
@@ -126,4 +182,3 @@ function onOpen() {
     headerRange.setFontColor('#ffffff');
   }
 }
-
