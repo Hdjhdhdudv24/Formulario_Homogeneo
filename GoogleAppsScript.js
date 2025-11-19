@@ -15,8 +15,18 @@
  * 11. Pega esa URL en ui.js en la variable GOOGLE_SCRIPT_URL
  */
 
+// Manejar CORS preflight (OPTIONS request)
+function doOptions(e) {
+  return ContentService.createTextOutput('')
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 function doPost(e) {
   try {
+    Logger.log('=== doPost llamado ===');
+    Logger.log('e.postData:', e.postData);
+    Logger.log('e.parameter:', e.parameter);
+    
     // Obtener la hoja activa
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
     
@@ -40,13 +50,31 @@ function doPost(e) {
       headerRange.setFontColor('#ffffff');
     }
     
-    // Parsear el JSON recibido
+    // Parsear el JSON recibido - intentar múltiples métodos
     let data;
+    
+    // Método 1: postData.contents (método estándar)
     if (e.postData && e.postData.contents) {
+      Logger.log('Parseando desde postData.contents');
       data = JSON.parse(e.postData.contents);
-    } else {
-      throw new Error('No se recibieron datos');
     }
+    // Método 2: parameter.data (si viene como parámetro)
+    else if (e.parameter && e.parameter.data) {
+      Logger.log('Parseando desde parameter.data');
+      data = JSON.parse(e.parameter.data);
+    }
+    // Método 3: leer directamente del body
+    else if (e.postData && e.postData.type === 'application/json') {
+      Logger.log('Parseando desde postData directo');
+      data = JSON.parse(e.postData.contents);
+    }
+    else {
+      Logger.log('ERROR: No se encontraron datos en ningún formato');
+      Logger.log('e completo:', JSON.stringify(e));
+      throw new Error('No se recibieron datos. Verifica el formato del request.');
+    }
+    
+    Logger.log('Datos recibidos:', JSON.stringify(data));
     
     // Validar que tenga submission_id (idempotencia)
     if (!data.submission_id) {
@@ -85,32 +113,63 @@ function doPost(e) {
     ];
     
     // Insertar en la hoja
+    Logger.log('Insertando fila en la hoja...');
     sheet.appendRow(row);
+    Logger.log('Fila insertada correctamente');
     
     // Enviar correo con la imagen si está disponible
-    if (data.contactEmail && data.imageBase64) {
-      try {
-        sendEmailWithImage(data.contactEmail, data.submission_id, data.imageBase64);
-      } catch (emailError) {
-        Logger.log('Error al enviar correo: ' + emailError.toString());
-        // No fallar el proceso si el correo falla
+    if (data.contactEmail) {
+      Logger.log('Verificando envío de correo...');
+      Logger.log('contactEmail:', data.contactEmail);
+      Logger.log('tiene imageBase64:', !!data.imageBase64);
+      
+      if (data.imageBase64) {
+        try {
+          Logger.log('Enviando correo con imagen...');
+          sendEmailWithImage(data.contactEmail, data.submission_id, data.imageBase64);
+          Logger.log('Correo enviado exitosamente');
+        } catch (emailError) {
+          Logger.log('Error al enviar correo: ' + emailError.toString());
+          // No fallar el proceso si el correo falla
+        }
+      } else {
+        Logger.log('No hay imagen para enviar en el correo');
+        // Enviar correo sin imagen
+        try {
+          MailApp.sendEmail({
+            to: data.contactEmail,
+            subject: 'Formulario de Asegurabilidad - Seguros Bolívar',
+            body: `Estimado/a entrevistador/a,\n\nSe ha recibido y procesado correctamente el formulario de declaración de asegurabilidad.\n\nDetalles:\n- ID de envío: ${data.submission_id}\n- Fecha: ${new Date().toLocaleString('es-ES')}\n\nAtentamente,\nSistema de Formularios - Seguros Bolívar`,
+            name: 'Seguros Bolívar - Sistema de Formularios'
+          });
+          Logger.log('Correo sin imagen enviado exitosamente');
+        } catch (emailError) {
+          Logger.log('Error al enviar correo sin imagen: ' + emailError.toString());
+        }
       }
+    } else {
+      Logger.log('No hay contactEmail, no se enviará correo');
     }
     
-    // Devolver éxito
+    // Devolver éxito con headers CORS
+    Logger.log('Devolviendo respuesta exitosa');
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
       message: 'Datos guardados correctamente',
       submission_id: data.submission_id
-    })).setMimeType(ContentService.MimeType.JSON);
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
     
   } catch (error) {
     // En caso de error, devolver mensaje
-    Logger.log('Error en doPost: ' + error.toString());
+    Logger.log('ERROR en doPost: ' + error.toString());
+    Logger.log('Stack trace: ' + error.stack);
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
-      error: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
+      error: error.toString(),
+      message: 'Error al procesar el formulario'
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
   }
 }
 

@@ -693,54 +693,105 @@ async function enqueue(payload) {
   }
 }
 
-// URL del Google Apps Script (REEMPLAZAR con tu URL después de desplegar el script)
-// Obtén esta URL después de desplegar el Google Apps Script (ver GoogleAppsScript.js)
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/TU_SCRIPT_ID/exec';
+// URL del Google Apps Script desplegado
+// Esta es la URL del script desplegado como "Aplicación web" en Google Apps Script
+// Formato para organización: https://script.google.com/a/macros/segurosbolivar.com/s/.../exec
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/a/macros/segurosbolivar.com/s/AKfycbwRtUwJGQFnhOwZsXblhlCDXVDzpqldfA5tgt3KJqqB-XXsmmshHOXvUk4s4eiSekoDEA/exec';
 
 // Función para enviar datos al servidor (Google Sheets via Apps Script)
 // El backend debe ser idempotente: si recibe el mismo submission_id, devolver éxito sin duplicar
 async function sendPayload(item, retryCount = 0) {
   if (!navigator.onLine) {
+    console.log('[sendPayload] Sin conexión');
     return false;
   }
   
   // Backoff exponencial: 500ms, 1s, 2s, 4s...
   const delay = Math.min(500 * Math.pow(2, retryCount), 10000);
   if (retryCount > 0) {
+    console.log(`[sendPayload] Reintentando (intento ${retryCount + 1}) después de ${delay}ms`);
     await new Promise(resolve => setTimeout(resolve, delay));
   }
   
   try {
-    // Enviar a Google Sheets via Apps Script
-    const response = await fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors', // Google Apps Script requiere no-cors
-      headers: { 
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(item.payload)
+    console.log('[sendPayload] Enviando payload:', {
+      submission_id: item.payload.submission_id,
+      contactEmail: item.payload.contactEmail,
+      numApplicants: item.payload.numApplicants,
+      hasImage: !!item.payload.imageBase64
     });
     
-    // Con no-cors no podemos leer la respuesta, pero si no hay error, asumimos éxito
-    // El script de Google manejará la idempotencia
-    return true;
-    
-    // NOTA: Si cambias a otro backend, usa esto:
-    // const response = await fetch('https://tu-api.com/intake/ph041', {
-    //   method: 'POST',
-    //   headers: { 
-    //     'Content-Type': 'application/json',
-    //     'X-Content-Type-Options': 'nosniff'
-    //   },
-    //   body: JSON.stringify(item.payload)
-    // });
-    // if (response.status === 200 || response.status === 202) {
-    //   return true;
-    // }
-    // return false;
+    // Intentar primero con cors para ver la respuesta
+    try {
+      const response = await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(item.payload)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('[sendPayload] Respuesta exitosa:', result);
+        if (result.success) {
+          return true;
+        } else {
+          console.error('[sendPayload] Error en respuesta:', result.error);
+          return false;
+        }
+      } else {
+        console.error('[sendPayload] Error HTTP:', response.status, response.statusText);
+        // Si falla por CORS, intentar con no-cors como fallback
+        throw new Error('CORS error, intentando con no-cors');
+      }
+    } catch (corsError) {
+      // Si falla por CORS, usar no-cors (no podemos verificar respuesta pero intentamos)
+      console.log('[sendPayload] CORS falló, usando no-cors como fallback');
+      console.log('[sendPayload] Error CORS:', corsError.message);
+      
+      // Método alternativo: usar formulario HTML para evitar CORS
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = GOOGLE_SCRIPT_URL;
+      form.style.display = 'none';
+      
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'data';
+      input.value = JSON.stringify(item.payload);
+      form.appendChild(input);
+      
+      document.body.appendChild(form);
+      
+      // Enviar y esperar un momento
+      return new Promise((resolve) => {
+        // Usar fetch con no-cors como último recurso
+        fetch(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(item.payload)
+        })
+        .then(() => {
+          console.log('[sendPayload] Enviado con no-cors (asumiendo éxito)');
+          document.body.removeChild(form);
+          // Con no-cors no podemos verificar, pero asumimos éxito si no hay error
+          resolve(true);
+        })
+        .catch((error) => {
+          console.error('[sendPayload] Error con no-cors:', error);
+          document.body.removeChild(form);
+          resolve(false);
+        });
+      });
+    }
     
   } catch (error) {
-    console.error('Error al enviar:', error);
+    console.error('[sendPayload] Error general:', error);
     // Si es error de red y no hemos intentado mucho, reintentar
     if (retryCount < 3 && (error.name === 'TypeError' || error.message?.includes('fetch'))) {
       return sendPayload(item, retryCount + 1);
