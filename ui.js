@@ -332,7 +332,51 @@ function waitForHtml2Canvas(callback, maxAttempts = 100) {
   }
 }
 
-// Función para generar imagen del formulario en base64
+// Función para comprimir imagen base64
+function compressImage(base64, maxSizeKB = 500) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      let quality = 0.9;
+      
+      // Reducir tamaño si es muy grande
+      const maxDimension = 2000;
+      if (width > maxDimension || height > maxDimension) {
+        const ratio = Math.min(maxDimension / width, maxDimension / height);
+        width = width * ratio;
+        height = height * ratio;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Intentar comprimir con diferentes calidades
+      function tryCompress(q) {
+        const compressed = canvas.toDataURL('image/jpeg', q);
+        const sizeKB = (compressed.length * 3) / 4 / 1024; // Aproximación del tamaño
+        
+        if (sizeKB <= maxSizeKB || q <= 0.3) {
+          const base64Only = compressed.split(',')[1];
+          console.log(`[compressImage] Imagen comprimida: ${sizeKB.toFixed(2)}KB, calidad: ${q}`);
+          resolve(base64Only);
+        } else {
+          tryCompress(q - 0.1);
+        }
+      }
+      
+      tryCompress(quality);
+    };
+    img.onerror = () => resolve(base64); // Si falla, devolver original
+    img.src = 'data:image/png;base64,' + base64;
+  });
+}
+
+// Función para generar imagen del formulario en base64 (comprimida)
 async function generateFormImage() {
   return new Promise(async (resolve, reject) => {
     try {
@@ -363,10 +407,10 @@ async function generateFormImage() {
       // Esperar un momento para que se apliquen los cambios
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Capturar el formulario como imagen
+      // Capturar el formulario como imagen (con escala reducida para menor tamaño)
       const canvas = await html2canvas(formElement, {
         backgroundColor: '#ffffff',
-        scale: 2,
+        scale: 1.5, // Reducido de 2 a 1.5 para menor tamaño
         logging: false,
         useCORS: true,
         allowTaint: false,
@@ -383,9 +427,13 @@ async function generateFormImage() {
       if (swBanner) swBanner.style.display = originalBannerDisplay;
       if (previewSection) previewSection.classList.remove('hidden');
       
-      // Convertir canvas a base64
-      const base64 = canvas.toDataURL('image/png').split(',')[1]; // Remover el prefijo data:image/png;base64,
-      resolve(base64);
+      // Convertir canvas a base64 y comprimir
+      const base64PNG = canvas.toDataURL('image/png').split(',')[1];
+      console.log(`[generateFormImage] Tamaño original: ${(base64PNG.length * 3 / 4 / 1024).toFixed(2)}KB`);
+      
+      // Comprimir a máximo 500KB (Google Apps Script tiene límite de ~6MB pero mejor ser conservador)
+      const compressed = await compressImage(base64PNG, 500);
+      resolve(compressed);
       
     } catch (error) {
       reject(error);
@@ -450,12 +498,22 @@ async function buildPayload(includeImage = false){
     createdAt: new Date().toISOString()
   };
   
-  // Añadir imagen si se solicita
+  // Añadir imagen si se solicita (pero validar tamaño)
   if (includeImage) {
     try {
-      payload.imageBase64 = await generateFormImage();
+      const imageBase64 = await generateFormImage();
+      const sizeKB = (imageBase64.length * 3) / 4 / 1024;
+      
+      // Si la imagen es muy grande después de comprimir, no incluirla
+      if (sizeKB > 2000) {
+        console.warn(`[buildPayload] Imagen muy grande (${sizeKB.toFixed(2)}KB), no se incluirá en el payload`);
+        // No incluir imagen si es muy grande
+      } else {
+        payload.imageBase64 = imageBase64;
+        console.log(`[buildPayload] Imagen incluida: ${sizeKB.toFixed(2)}KB`);
+      }
     } catch (error) {
-      console.error('Error al generar imagen:', error);
+      console.error('[buildPayload] Error al generar imagen:', error);
       // Continuar sin imagen si falla
     }
   }
@@ -696,7 +754,7 @@ async function enqueue(payload) {
 // URL del Google Apps Script desplegado
 // Esta es la URL del script desplegado como "Aplicación web" en Google Apps Script
 // Formato para organización: https://script.google.com/a/macros/segurosbolivar.com/s/.../exec
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/a/macros/segurosbolivar.com/s/AKfycbwRtUwJGQFnhOwZsXblhlCDXVDzpqldfA5tgt3KJqqB-XXsmmshHOXvUk4s4eiSekoDEA/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/a/macros/segurosbolivar.com/s/AKfycbwXfzdI6uyH-m9ZkG9w2u0Yc6aDTXwL_ESiJ45qcQkprNJEhSEtVRiwfuGO1lbfcz0HfQ/exec';
 
 // Función para enviar datos al servidor (Google Sheets via Apps Script)
 // El backend debe ser idempotente: si recibe el mismo submission_id, devolver éxito sin duplicar

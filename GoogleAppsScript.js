@@ -74,7 +74,17 @@ function doPost(e) {
       throw new Error('No se recibieron datos. Verifica el formato del request.');
     }
     
-    Logger.log('Datos recibidos:', JSON.stringify(data));
+    // Log datos sin imagen para no saturar logs
+    const dataForLog = {};
+    for (var key in data) {
+      if (key === 'imageBase64' && data[key]) {
+        const imageSizeKB = (data[key].length * 3) / 4 / 1024;
+        dataForLog[key] = '[IMAGEN: ' + imageSizeKB.toFixed(2) + 'KB]';
+      } else {
+        dataForLog[key] = data[key];
+      }
+    }
+    Logger.log('Datos recibidos:', JSON.stringify(dataForLog));
     
     // Validar que tenga submission_id (idempotencia)
     if (!data.submission_id) {
@@ -112,30 +122,50 @@ function doPost(e) {
       data.createdAt || timestamp            // I: createdAt
     ];
     
-    // Insertar en la hoja
+    // Insertar en la hoja PRIMERO (antes de procesar imagen)
     Logger.log('Insertando fila en la hoja...');
     sheet.appendRow(row);
     Logger.log('Fila insertada correctamente');
     
-    // Enviar correo con la imagen si está disponible
+    // Devolver éxito INMEDIATAMENTE para evitar timeout
+    // El correo se enviará en segundo plano si es posible
+    Logger.log('Devolviendo respuesta exitosa (antes de enviar correo)');
+    const response = ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      message: 'Datos guardados correctamente',
+      submission_id: data.submission_id
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+    
+    // Intentar enviar correo (pero no bloquear la respuesta)
     if (data.contactEmail) {
       Logger.log('Verificando envío de correo...');
       Logger.log('contactEmail:', data.contactEmail);
       Logger.log('tiene imageBase64:', !!data.imageBase64);
       
-      if (data.imageBase64) {
-        try {
-          Logger.log('Enviando correo con imagen...');
-          sendEmailWithImage(data.contactEmail, data.submission_id, data.imageBase64);
-          Logger.log('Correo enviado exitosamente');
-        } catch (emailError) {
-          Logger.log('Error al enviar correo: ' + emailError.toString());
-          // No fallar el proceso si el correo falla
-        }
-      } else {
-        Logger.log('No hay imagen para enviar en el correo');
-        // Enviar correo sin imagen
-        try {
+      try {
+        if (data.imageBase64) {
+          // Validar tamaño de imagen antes de procesar
+          const imageSizeKB = (data.imageBase64.length * 3) / 4 / 1024;
+          Logger.log('Tamaño de imagen:', imageSizeKB.toFixed(2), 'KB');
+          
+          if (imageSizeKB > 2000) {
+            Logger.log('Imagen muy grande, enviando correo sin imagen');
+            // Enviar correo sin imagen si es muy grande
+            MailApp.sendEmail({
+              to: data.contactEmail,
+              subject: 'Formulario de Asegurabilidad - Seguros Bolívar',
+              body: `Estimado/a entrevistador/a,\n\nSe ha recibido y procesado correctamente el formulario de declaración de asegurabilidad.\n\nDetalles:\n- ID de envío: ${data.submission_id}\n- Fecha: ${new Date().toLocaleString('es-ES')}\n\nNota: La imagen del formulario no pudo ser adjuntada debido a su tamaño.\n\nAtentamente,\nSistema de Formularios - Seguros Bolívar`,
+              name: 'Seguros Bolívar - Sistema de Formularios'
+            });
+          } else {
+            Logger.log('Enviando correo con imagen...');
+            sendEmailWithImage(data.contactEmail, data.submission_id, data.imageBase64);
+            Logger.log('Correo enviado exitosamente');
+          }
+        } else {
+          Logger.log('No hay imagen para enviar en el correo');
+          // Enviar correo sin imagen
           MailApp.sendEmail({
             to: data.contactEmail,
             subject: 'Formulario de Asegurabilidad - Seguros Bolívar',
@@ -143,22 +173,16 @@ function doPost(e) {
             name: 'Seguros Bolívar - Sistema de Formularios'
           });
           Logger.log('Correo sin imagen enviado exitosamente');
-        } catch (emailError) {
-          Logger.log('Error al enviar correo sin imagen: ' + emailError.toString());
         }
+      } catch (emailError) {
+        Logger.log('Error al enviar correo: ' + emailError.toString());
+        // No fallar el proceso si el correo falla - los datos ya están guardados
       }
     } else {
       Logger.log('No hay contactEmail, no se enviará correo');
     }
     
-    // Devolver éxito con headers CORS
-    Logger.log('Devolviendo respuesta exitosa');
-    return ContentService.createTextOutput(JSON.stringify({
-      success: true,
-      message: 'Datos guardados correctamente',
-      submission_id: data.submission_id
-    }))
-    .setMimeType(ContentService.MimeType.JSON);
+    return response;
     
   } catch (error) {
     // En caso de error, devolver mensaje
@@ -176,11 +200,16 @@ function doPost(e) {
 // Función para enviar correo con imagen adjunta
 function sendEmailWithImage(email, submissionId, imageBase64) {
   try {
+    // Detectar formato de imagen (JPEG o PNG)
+    const isJPEG = imageBase64.length < 1000000; // JPEGs comprimidos son generalmente más pequeños
+    const mimeType = isJPEG ? 'image/jpeg' : 'image/png';
+    const fileName = isJPEG ? 'formulario-asegurabilidad.jpg' : 'formulario-asegurabilidad.png';
+    
     // Convertir base64 a blob
     const imageBlob = Utilities.newBlob(
       Utilities.base64Decode(imageBase64),
-      'image/png',
-      'formulario-asegurabilidad.png'
+      mimeType,
+      fileName
     );
     
     // Preparar el cuerpo del correo
