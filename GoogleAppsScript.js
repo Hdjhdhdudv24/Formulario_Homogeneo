@@ -16,8 +16,10 @@
  */
 
 // Manejar CORS preflight (OPTIONS request)
+// Nota: Google Apps Script no permite modificar headers CORS, pero esta función ayuda
 function doOptions(e) {
-  return ContentService.createTextOutput('')
+  Logger.log('doOptions llamado (CORS preflight)');
+  return ContentService.createTextOutput(JSON.stringify({ status: 'ok' }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 

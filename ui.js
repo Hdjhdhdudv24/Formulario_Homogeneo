@@ -779,73 +779,27 @@ async function sendPayload(item, retryCount = 0) {
       hasImage: !!item.payload.imageBase64
     });
     
-    // Intentar primero con cors para ver la respuesta
+    // Google Apps Script con URLs de organización NO soporta CORS bien
+    // Usar directamente no-cors desde el principio
+    // Nota: Con no-cors no podemos verificar la respuesta, pero es la única forma
+    console.log('[sendPayload] Enviando con no-cors (requerido para Google Apps Script)');
+    
     try {
+      // Enviar con no-cors (única forma que funciona con Google Apps Script)
       const response = await fetch(GOOGLE_SCRIPT_URL, {
         method: 'POST',
-        mode: 'cors',
+        mode: 'no-cors', // Google Apps Script requiere no-cors
         headers: { 
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(item.payload)
       });
       
-      if (response.ok) {
-        const result = await response.json();
-        console.log('[sendPayload] Respuesta exitosa:', result);
-        if (result.success) {
-          return true;
-        } else {
-          console.error('[sendPayload] Error en respuesta:', result.error);
-          return false;
-        }
-      } else {
-        console.error('[sendPayload] Error HTTP:', response.status, response.statusText);
-        // Si falla por CORS, intentar con no-cors como fallback
-        throw new Error('CORS error, intentando con no-cors');
-      }
-    } catch (corsError) {
-      // Si falla por CORS, usar no-cors (no podemos verificar respuesta pero intentamos)
-      console.log('[sendPayload] CORS falló, usando no-cors como fallback');
-      console.log('[sendPayload] Error CORS:', corsError.message);
-      
-      // Método alternativo: usar formulario HTML para evitar CORS
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = GOOGLE_SCRIPT_URL;
-      form.style.display = 'none';
-      
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'data';
-      input.value = JSON.stringify(item.payload);
-      form.appendChild(input);
-      
-      document.body.appendChild(form);
-      
-      // Enviar y esperar un momento
-      return new Promise((resolve) => {
-        // Usar fetch con no-cors como último recurso
-        fetch(GOOGLE_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(item.payload)
-        })
-        .then(() => {
-          console.log('[sendPayload] Enviado con no-cors (asumiendo éxito)');
-          document.body.removeChild(form);
-          // Con no-cors no podemos verificar, pero asumimos éxito si no hay error
-          resolve(true);
-        })
-        .catch((error) => {
-          console.error('[sendPayload] Error con no-cors:', error);
-          document.body.removeChild(form);
-          resolve(false);
-        });
-      });
+      // Con no-cors no podemos leer la respuesta, pero si no hay error de red, asumimos éxito
+      // El usuario deberá verificar en Google Sheets si los datos llegaron
+      console.log('[sendPayload] Enviado con no-cors (no se puede verificar respuesta del servidor)');
+      console.log('[sendPayload] IMPORTANTE: Verifica en Google Sheets si los datos se guardaron correctamente');
+      return true;
     }
     
   } catch (error) {
