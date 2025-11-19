@@ -26,11 +26,18 @@ function doOptions(e) {
 function doPost(e) {
   try {
     Logger.log('=== doPost llamado ===');
-    Logger.log('e.postData:', e.postData);
-    Logger.log('e.parameter:', e.parameter);
+    Logger.log('Timestamp:', new Date().toISOString());
+    Logger.log('e.postData existe:', !!e.postData);
+    Logger.log('e.parameter existe:', !!e.parameter);
+    
+    if (e.postData) {
+      Logger.log('e.postData.type:', e.postData.type);
+      Logger.log('e.postData.contents length:', e.postData.contents ? e.postData.contents.length : 'null');
+    }
     
     // Obtener la hoja activa
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    Logger.log('Hoja obtenida:', sheet.getName());
     
     // Crear encabezados si la hoja está vacía
     if (sheet.getLastRow() === 0) {
@@ -72,8 +79,26 @@ function doPost(e) {
     }
     else {
       Logger.log('ERROR: No se encontraron datos en ningún formato');
-      Logger.log('e completo:', JSON.stringify(e));
-      throw new Error('No se recibieron datos. Verifica el formato del request.');
+      Logger.log('e.postData:', e.postData);
+      Logger.log('e.parameter:', e.parameter);
+      
+      // Intentar leer el body completo como string
+      if (e.postData && typeof e.postData.contents === 'string') {
+        Logger.log('Intentando parsear postData.contents como string directo');
+        try {
+          data = JSON.parse(e.postData.contents);
+          Logger.log('Parseo exitoso desde string directo');
+        } catch (parseError) {
+          Logger.log('Error al parsear:', parseError.toString());
+          throw new Error('No se recibieron datos válidos. Verifica el formato del request.');
+        }
+      } else {
+        Logger.log('e completo (sin imagen):', JSON.stringify({
+          postData: e.postData ? { type: e.postData.type, length: e.postData.contents ? e.postData.contents.length : 0 } : null,
+          parameter: e.parameter
+        }));
+        throw new Error('No se recibieron datos. Verifica el formato del request.');
+      }
     }
     
     // Log datos sin imagen para no saturar logs
@@ -126,8 +151,19 @@ function doPost(e) {
     
     // Insertar en la hoja PRIMERO (antes de procesar imagen)
     Logger.log('Insertando fila en la hoja...');
-    sheet.appendRow(row);
-    Logger.log('Fila insertada correctamente');
+    Logger.log('Fila a insertar:', row);
+    try {
+      sheet.appendRow(row);
+      Logger.log('Fila insertada correctamente en la fila:', sheet.getLastRow());
+      
+      // Verificar que se insertó correctamente
+      const lastRow = sheet.getLastRow();
+      const insertedData = sheet.getRange(lastRow, 1, 1, 9).getValues()[0];
+      Logger.log('Datos verificados en la hoja:', insertedData);
+    } catch (appendError) {
+      Logger.log('ERROR al insertar fila:', appendError.toString());
+      throw appendError;
+    }
     
     // Devolver éxito INMEDIATAMENTE para evitar timeout
     // El correo se enviará en segundo plano si es posible
